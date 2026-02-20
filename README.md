@@ -7,6 +7,7 @@ K6 extension to perform tests on couchbase.
 - Supports inserting a document.
 - Supports Batch insertion.
 - Supports findOne (Fetch by primary key)
+- Supports findMany (Batch fetch by primary keys)
 - Supports deleting a document by id
 - Supports upserts
 - Testing query performance
@@ -146,6 +147,22 @@ export default () => {
     // syntax :: client.findOne("<db>", "<scope>", "<keyspace>", "<docId>");
     var res = client.findOne("test", "_default", "_default", "002wPJwiJArcUpz");
     console.log(res);
+}
+
+```
+
+### FindMany (Batch Get) test
+
+```js
+import xk6_couchbase from 'k6/x/couchbase';
+
+
+const client = xk6_couchbase.newClient('localhost', '<username>', '<password>');
+export default () => {
+    // syntax :: client.findMany("<db>", "<scope>", "<keyspace>", ["<docId1>", "<docId2>", ...]);
+    // Returns a map of docId -> document for keys that exist. Missing keys are omitted.
+    var res = client.findMany("test", "_default", "_default", ["key1", "key2", "key3"]);
+    console.log(JSON.stringify(res));
 }
 
 ```
