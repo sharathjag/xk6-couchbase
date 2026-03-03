@@ -172,6 +172,37 @@ func (c *Client) InsertBatch(bucketName string, scope string, collection string,
 	return nil
 }
 
+func (c *Client) FindMany(bucketName string, scope string, collection string, keys []string) (map[string]interface{}, error) {
+	bucket, err := c.getBucket(bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bucket connection for findMany. Err: %w", err)
+	}
+	col := bucket.Scope(scope).Collection(collection)
+
+	batchItems := make([]gocb.BulkOp, len(keys))
+	for i, key := range keys {
+		batchItems[i] = &gocb.GetOp{ID: key}
+	}
+
+	err = col.Do(batchItems, &gocb.BulkOpOptions{Timeout: 3 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+
+	results := make(map[string]interface{}, len(keys))
+	for _, op := range batchItems {
+		getOp := op.(*gocb.GetOp)
+		if getOp.Err == nil {
+			var doc interface{}
+			getOp.Result.Content(&doc)
+			results[getOp.ID] = doc
+		}
+		// Missing keys silently absent from results map
+	}
+
+	return results, nil
+}
+
 func (c *Client) Find(query string) (any, error) {
 	var result interface{}
 
