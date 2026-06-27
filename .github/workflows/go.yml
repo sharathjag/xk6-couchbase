@@ -22,11 +22,10 @@ jobs:
         go-version-file: go.mod
 
     - name: Test
-      run: go test ./...
+      run: make test
 
-    - name: Install xk6
-      run: go install go.k6.io/xk6/cmd/xk6@latest
     - name: Build
-      run: xk6 build --output xk6-couchbase --with github.com/thotasrinath/xk6-couchbase=.
+      run: make build
+
     - name: List Binary
       run: ls .
