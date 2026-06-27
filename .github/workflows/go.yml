@@ -17,10 +17,14 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
-    - name: Install dependencies
+        go-version-file: go.mod
+
+    - name: Test
+      run: go test ./...
+
+    - name: Install xk6
       run: go install go.k6.io/xk6/cmd/xk6@latest
     - name: Build
       run: xk6 build --output xk6-couchbase --with github.com/thotasrinath/xk6-couchbase=.
