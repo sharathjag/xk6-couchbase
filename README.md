@@ -7,6 +7,7 @@ K6 extension to perform tests on couchbase.
 - Supports inserting a document.
 - Supports Batch insertion.
 - Supports findOne (Fetch by primary key)
+- Supports findMany (Batch fetch by primary keys)
 - Supports deleting a document by id
 - Supports upserts
 - Testing query performance
@@ -14,20 +15,53 @@ K6 extension to perform tests on couchbase.
 
 ## Build Instructions
 
-- Install xk6 using (go install go.k6.io/xk6/cmd/xk6@latest)
 ### For Development
+
 ```shell
 git clone git@github.com:thotasrinath/xk6-couchbase.git
 cd xk6-couchbase
-xk6 build --output xk6-couchbase --with github.com/thotasrinath/xk6-couchbase=.
+make build
 ```
+
+This produces a `./xk6-couchbase` binary from the local source. No global `xk6`
+is required — the Makefile invokes it via `go run`. See the
+[Development](#development) section for the full set of `make` targets (tests,
+lint, example validation).
+
 ### For Use
+
+Install xk6, then build a k6 binary with the published extension:
+
 ```shell
+go install go.k6.io/xk6/cmd/xk6@latest
 xk6 build --with github.com/thotasrinath/xk6-couchbase@latest
 ```
 
+## Development
+
+A `Makefile` wraps the common tasks (run `make` with no target to list them):
+
+```shell
+make build      # build a k6 binary with this extension from local source
+make test       # run unit tests
+make check      # gofmt + go vet + test (pre-commit gate)
+make lint       # golangci-lint (see https://golangci-lint.run to install)
+make validate   # build + ensure local Couchbase + run every example end-to-end
+```
+
+Unit tests cover the module lifecycle, the shared-connection singleton, and the
+per-VU connection behavior. They use k6's `modulestest` runtime and do not
+require a live Couchbase cluster (`gocb.Connect` is lazy), so `make test` runs
+anywhere.
+
+`make validate` runs the example scripts against a local Couchbase (starting a
+Docker container if one isn't already reachable). See
+[examples/README.md](examples/README.md) for details.
+
 ## Examples
+
 ### Document Insertion Test
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -58,13 +92,16 @@ function makeId(length) {
 }
 
 ```
+
 ##### Below is the example commands to test the script
+
 ```bash
 # Update examples/test-insert.js with cluster credentials and bucket name
  ./xk6-couchbase run --vus 10 --duration 30s examples/test-insert.js
 ```
 
 ### Batch Insert Documents
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -109,7 +146,25 @@ function makeId(length) {
 }
 
 ```
+
+### Exists test
+
+```js
+import xk6_couchbase from 'k6/x/couchbase';
+
+
+const client = xk6_couchbase.newClient('localhost', '<username>', '<password>');
+export default () => {
+    // syntax :: client.exists("<db>", "<scope>", "<keyspace>", "<docId>");
+    var res = client.exists("test", "_default", "_default", "002wPJwiJArcUpz");
+    console.log(res);
+}
+
+```
+
+
 ### FindOne test
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -123,7 +178,24 @@ export default () => {
 
 ```
 
+### FindMany (Batch Get) test
+
+```js
+import xk6_couchbase from 'k6/x/couchbase';
+
+
+const client = xk6_couchbase.newClient('localhost', '<username>', '<password>');
+export default () => {
+    // syntax :: client.findMany("<db>", "<scope>", "<keyspace>", ["<docId1>", "<docId2>", ...]);
+    // Returns a map of docId -> document for keys that exist. Missing keys are omitted.
+    var res = client.findMany("test", "_default", "_default", ["key1", "key2", "key3"]);
+    console.log(JSON.stringify(res));
+}
+
+```
+
 ### Document Deletion Test
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -137,6 +209,7 @@ export default () => {
 ```
 
 ### Query test
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -150,7 +223,8 @@ export default () => {
 }
 ```
 
-### Query using a prepared statement 
+### Query using a prepared statement
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 
@@ -165,6 +239,7 @@ export default () => {
 ```
 
 ### Upsert test
+
 #### Initial data load is expected. Data with sequential Id's could be generated with below script. File - examples/load-sequential-data.js
 
 ```js
@@ -196,7 +271,9 @@ export default function () {
     client.insert("test", "_default", "_default", String(docId), doc);
 }
 ```
+
 #### Upsert test script to generate random id in range and excute Upsert. File - examples/test-upsert.js
+
 ```js
 import xk6_couchbase from 'k6/x/couchbase';
 import {randomIntBetween} from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
@@ -214,4 +291,52 @@ export default () => {
     };
     client.upsert("test", "_default", "_default", String(randomIntBetween(0, 100000)), doc);
 }
+```
+
+
+### Client with options
+
+Default NewClient is a good start to get familiar with the extension with little wiring and get going.  For refined flexibility of connection management during the tests,  following additional interfaces are provided:
+
+* NewClientWithSharedConnection: Shares a single connection across all the VUs and maximizes the QPS without affecting client resources.
+* NewClientPerVU: Creates new client connection for each VU. Useful for testing max number of connections that the cluster can handle.
+
+In addition to controlling number of connections, both the functions provide:
+
+* Ability to pre-warm the buckets as part of initialization.
+* Ability to set timeout duration for bucket readiness (WaitUntilReady timeout).
+* Ability to control the connection buffer size. By default couchbase client uses 20MB buffer size which limits the number of concurrent connections that can be created by a single client instance.
+
+#### Example for wiring client with shared connection across VUs
+
+```js
+import xk6_couchbase from 'k6/x/couchbase';
+
+
+const dbConfig = { hostname: 'localhost', username: '<username>', password: '<password>' };
+const bucketsToPreWarm = ['test'];
+const client = xk6_couchbase.newClientWithSharedConnection(dbConfig, bucketsToPreWarm, "5s");
+export default () => {
+    // syntax :: client.findOne("<db>", "<scope>", "<keyspace>", "<docId>");
+    var res = client.findOne("test", "_default", "_default", "002wPJwiJArcUpz");
+    console.log(res);
+}
+
+```
+
+#### Example for wiring client with unique connections per VUs
+
+```javascript
+import xk6_couchbase from 'k6/x/couchbase';
+
+
+const dbConfig = { hostname: 'localhost', username: '<username>', password: '<password>' };
+const bucketsToPreWarm = ['test'];
+const client = xk6_couchbase.newClientPerVU(dbConfig, bucketsToPreWarm, "5s");
+export default () => {
+    // syntax :: client.findOne("<db>", "<scope>", "<keyspace>", "<docId>");
+    var res = client.findOne("test", "_default", "_default", "002wPJwiJArcUpz");
+    console.log(res);
+}
+
 ```
